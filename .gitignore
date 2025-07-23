@@ -1,3 +1,6 @@
 *.ipynb
 csvs
 jsons
+additionalData.csv
+cleanedComments.csv
+emojSentDist.csv

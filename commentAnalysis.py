@@ -109,14 +109,6 @@ print(f"avg sentiment of comments without emojis == {sentNoEmoji}")
 # with emojis = 0.19
 # without emojis = 0.13
 
-
-# export cleaned comment data to new csv
-comments.to_csv('cleanedComments.csv')
-
-# sentiment distribution for comments w and w/out emojis --> to be exported for a box plot in power bi
-emojiSentDf = comments[['polarity', 'has_emoji']].copy()
-emojiSentDf.to_csv('emojSentDist.csv')
-
 # preprocess comments for use in topic modeling (Non-negative Matrix Factorization)
 # preprocessing will include lowercasing, removing punctuation, removing stopwords, and tokenizing
 
@@ -134,7 +126,13 @@ extra = {'video','song','omg','amazing','nice','wow','page','funny','love','good
     'think','know','feel','give','take','come','want','need','can','could','would',
     'i','you','he','she','we','they','me','him','her','us','them','this','that','these',
     'those','thing','stuff','someone','anyone','everyone','nobody', 'fuck','www','shit',
-    'thank', 'does', 'hell','youtube', 'trending','does','did', 'fucking'} 
+    'thank', 'does', 'hell','youtube', 'trending','does','did', 'fucking', 'view','trend',
+    'awesome','channel','congrat', 'number','thumbnail', 'listen', 'damn', 'ass','hate',
+    'episode','talk','old','care','wait','finally','http','absolutely','iphone','trailer',
+    'live','hey','hear','vid','sound','facebook','gofundme','google','cute','voice','wanna'
+    'tell','check','till','yes','goo','million','second','great','job','hope','review','artist',
+    'singer','fan','cover','free','right','try','year','tell','understand','long','buy','god'
+    'black','actually','talk','hear','cute','ago','white'} 
 # ^tuned over the course of several runs to remove more stopwords
 
 custom_stopwords = list(engStopwords.union(extra))
@@ -146,35 +144,46 @@ def lemmatize_text(text):
 
 
 # make lowercase
-comments['lowercased'] = comments['comment_text'].str.lower()
+""" comments['lowercased'] = comments['comment_text'].str.lower()
 # remove punctuation
 comments['puncRmvd'] = comments['lowercased'].apply(removePunc)
 # remove comments shorter than 5 words
 comments = comments[comments['puncRmvd'].str.split().str.len() >= 5]
-# lemmatize
+# lemmatize; saved to csv since it takes so long and ran again to tune the stopwords list
 tqdm.pandas()
 comments['lemmatized'] = comments['puncRmvd'].fillna(' ').progress_apply(lemmatize_text)
-
+# write lemmatized comments to csv to be loaded later, since lemmatization takes so long
+comments['lemmatized'].to_csv('lemmComments.csv')
 # drop intermediate cols
-comments.drop([['puncRmvd', 'lowercased']])
+comments.drop(['puncRmvd', 'lowercased'], axis = 1)
 
-# vectorize
+# make vectorizer
 vectorizer = TfidfVectorizer(
     max_df = 0.95, 
-    min_df = 5, 
-    token_pattern = r'\b[a-zA-Z]{3,}\b', # only alphabetic words, 3+ characters
+    min_df = 10, 
+    token_pattern = r'\b[a-zA-Z]{4,}\b', # only alphabetic words, 3+ characters
     max_features = 3000
 )
-tfidf_matrix = vectorizer.fit_transform(comments['lemmatized'])
+
+# read lemmatized comments from csv
+lemmatized = pd.read_csv('lemmComments.csv').dropna(subset = 'lemmatized')
+nullLemmComm = int(lemmatized['lemmatized'].isnull().sum())
+print(f"nulls in lemmatized comments = {nullLemmComm}")
+
+# vectorize
+if nullLemmComm == 0:
+    tfidf_matrix = vectorizer.fit_transform(lemmatized['lemmatized'])
+else:
+    print("there were nulls in the lemmatized comments")
 
 nmf_model = nmf(n_components = 10, random_state = 42)
 nmf_features = nmf_model.fit_transform(tfidf_matrix)
 # get top words for each topic
 features = vectorizer.get_feature_names_out()
-nTopWords = 10
+nTopWords = 20
 for topic_idx, topic in enumerate(nmf_model.components_):
     topWords = [features[i] for i in topic.argsort()[:-nTopWords - 1:-1]]
-    print(f"topic {topic_idx}: {', '.join(topWords)}")
+    print(f"topic {topic_idx}: {', '.join(topWords)}") """
 
 # the above works, but turns up "top" words for each of the 10 topics that 
 # aren't very helpful, including explatives, abbreviations/exclamations like 'omg'
@@ -182,8 +191,18 @@ for topic_idx, topic in enumerate(nmf_model.components_):
 # comments ie less than 5 words (beginning line 153) and use a custom stopwords list 
 # including common youtube lingo like subscribe, channel, and video
 
-# comments['dominant_topic'] = np.argmax(nmf_features, axis = 1)
-# print(comments['dominant_topic'].head())
+# refined the stop word list as much as possible given skill and knowhow, left with some topics 
+# that are easily named, and some that are not
+# topic 0: makeup
+# topic 1: tutorials?
+# topic 2: politics
+# topic 3: online stuff? e.g. social media
+# topic 4: unclear
+# topic 5: unclear
+# topic 6: unclear
+# topic 7: unclear
+# topic 8: unclear
+# topic 9: unclear
 
 # ============================================================================
 
@@ -263,8 +282,12 @@ avgEngByCat = (
     .sort_values('normScore', ascending = False)
 )
 
-# export above avg df to csv for later use in power bi
-# avgEngByCat.to_csv('AvgEngageByVidCat.csv')
+avgEngByCat.plot(kind = 'bar', x = 'category_name', y = 'normScore', legend = False, figsize = (10, 6),
+                 title = 'Average Video Engagement Score by Video Category')
+plt.xticks(rotation = 45, ha = 'right')
+plt.tight_layout()
+plt.show()
+
 
 # was going to merge df1 and comments on video_id to do a correlation matrix, but realized
 # it's apples and oranges: df1 is data on the level of the video, and comment is just comment data, 
@@ -273,10 +296,16 @@ avgEngByCat = (
 cols = ['views', 'likes', 'dislikes', 'comment_count', 'comments_disabled', 'engageScore']
 corr_df = df1[cols]
 mat = corr_df.corr()
-# export the matrix for later use in heatmap via power bi
-mat.to_csv('vidDataCorr.csv')
+fig, ax = plt.subplots(1,1, figsize = (8, 8))
+heatplot = ax.imshow(mat, cmap = 'coolwarm', vmin = -1, vmax = 1) # NOT WORKING AS EXPECTED, MUST DO SOME WORK ON IT
+ax.set_xticks(range(len(cols)))
+ax.set_yticks(range(len(cols)))
+ax.set_xticklabels(cols, rotation = 45, ha = 'right')
+ax.set_yticklabels(cols)
+ax.set_title('Heat map of video data correlation matrix')
+plt.colorbar(heatplot)
+plt.tight_layout()
+plt.show()
 
 
-
-#   TO DO NOTES
-# run code, focus on lemmatization and topic modeling section
+# TO DO: WORK ON GETTING HEATMAP TO DISPLAY AS EXPECTED 
